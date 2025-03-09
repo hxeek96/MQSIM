@@ -8,10 +8,20 @@
 
 namespace SSD_Components
 {
+	/*
+	* SSD의 주소 매핑 테이블을 캐싱하는 클래스
+	* 자주 접근하는 매핑 정보를 메모리에 캐싱하여 성능 향상
+	* capacity: 캐시에 저장할 수 있는 최대 매핑 엔트리 수를 지정
+	*/
 	Cached_Mapping_Table::Cached_Mapping_Table(unsigned int capacity) : capacity(capacity)
 	{
 	}
 
+	/*
+	* 소멸자 함수
+	* 캐시 메모리에 할당된 모든 매핑 엔트리를 정리하고 메모리를 해제
+	* 메모리 누수 방지를 위해 모든 동적 할당 객체를 삭제
+	*/
 	Cached_Mapping_Table::~Cached_Mapping_Table()
 	{
 		std::unordered_map<LPA_type, CMTSlotType*> addressMap;
@@ -24,6 +34,13 @@ namespace SSD_Components
 		}
 	}
 
+	/*
+	* 특정 논리 주소(LPA)에 대한 매핑이 캐시에 존재하는지 확인하는 함수
+	* streamID: 데이터 스트림의 고유 식별자
+	* lpa: 검색할 논리 페이지 주소
+	* 반환값: 매핑이 캐시에 있고 유효하면 true, 없거나 무효하면 false
+	* 캐시 히트/미스 여부를 디버그 메시지로 출력
+	*/
 	inline bool Cached_Mapping_Table::Exists(const stream_id_type streamID, const LPA_type lpa)
 	{
 		LPA_type key = LPN_TO_UNIQUE_KEY(streamID, lpa);
@@ -41,6 +58,13 @@ namespace SSD_Components
 		return true;
 	}
 
+	/*
+	* 캐시에서 논리 주소에 매핑된 물리 주소(PPA)를 가져오는 함수
+	* LRU 리스트의 최신 접근 정보를 업데이트하여 캐시 교체 정책에 활용
+	* streamID: 데이터 스트림 식별자
+	* lpn: 논리 페이지 번호
+	* 반환값: 매핑된 물리 페이지 주소(PPA)
+	*/
 	PPA_type Cached_Mapping_Table::Retrieve_ppa(const stream_id_type streamID, const LPA_type lpn)
 	{
 		LPA_type key = LPN_TO_UNIQUE_KEY(streamID, lpn);
@@ -52,6 +76,13 @@ namespace SSD_Components
 		return it->second->PPA;
 	}
 
+	/*
+	* 특정 페이지의 섹터별 쓰기 상태를 나타내는 비트맵을 반환하는 함수
+	* 각 섹터가 유효한 데이터를 포함하는지 여부를 비트 단위로 표시
+	* streamID: 데이터 스트림 식별자
+	* lpn: 논리 페이지 번호
+	* 반환값: 페이지 내 섹터들의 쓰기 상태를 나타내는 비트맵
+	*/
 	page_status_type Cached_Mapping_Table::Get_bitmap_vector_of_written_sectors(const stream_id_type streamID, const LPA_type lpn)
 	{
 		LPA_type key = LPN_TO_UNIQUE_KEY(streamID, lpn);
@@ -62,6 +93,14 @@ namespace SSD_Components
 		return it->second->WrittenStateBitmap;
 	}
 
+	/*
+	* 캐시의 매핑 정보를 새로운 값으로 업데이트하는 함수
+	* 물리 주소와 페이지 상태를 갱신하고 더티 비트를 설정
+	* streamID: 데이터 스트림 식별자
+	* lpa: 논리 페이지 주소
+	* ppa: 새로운 물리 페이지 주소
+	* pageWriteState: 새로운 페이지 쓰기 상태
+	*/
 	void Cached_Mapping_Table::Update_mapping_info(const stream_id_type streamID, const LPA_type lpa, const PPA_type ppa, const page_status_type pageWriteState)
 	{
 		LPA_type key = LPN_TO_UNIQUE_KEY(streamID, lpa);
@@ -75,6 +114,14 @@ namespace SSD_Components
 		DEBUG("Address mapping table update entry - Stream ID:" << streamID << ", LPA:" << lpa << ", PPA:" << ppa)
 	}
 
+	/*
+	* 캐시에 새로운 매핑 정보를 삽입하는 함수
+	* 이전에 예약된 슬롯에 새로운 매핑 데이터를 기록
+	* streamID: 데이터 스트림 식별자
+	* lpa: 논리 페이지 주소
+	* ppa: 물리 페이지 주소
+	* pageWriteState: 페이지 쓰기 상태
+	*/
 	void Cached_Mapping_Table::Insert_new_mapping_info(const stream_id_type streamID, const LPA_type lpa, const PPA_type ppa, const unsigned long long pageWriteState)
 	{
 		LPA_type key = LPN_TO_UNIQUE_KEY(streamID, lpa);
@@ -90,6 +137,14 @@ namespace SSD_Components
 		it->second->Stream_id = streamID;
 		DEBUG("Address mapping table insert entry - Stream ID:" << streamID << ", LPA:" << lpa << ", PPA:" << ppa)
 	}
+
+	/*
+	* 특정 LPN에 대해 슬롯이 예약되어 있고 대기 상태인지 확인하는 함수
+	* 매핑 정보 삽입을 위한 슬롯이 미리 할당되어 있는지 검사
+	* streamID: 데이터 스트림 식별자
+	* lpn: 논리 페이지 번호
+	* 반환값: 슬롯이 예약되어 있고 대기 상태이면 true
+	*/
 	bool Cached_Mapping_Table::Is_slot_reserved_for_lpn_and_waiting(const stream_id_type streamID, const LPA_type lpn)
 	{
 		LPA_type key = LPN_TO_UNIQUE_KEY(streamID, lpn);
@@ -103,11 +158,23 @@ namespace SSD_Components
 		return false;
 	}
 
+	/*
+	* 캐시에 새로운 매핑을 저장할 여유 공간이 있는지 확인하는 함수
+	* 현재 저장된 매핑 수가 최대 용량보다 적은지 검사
+	* 반환값: 여유 공간이 있으면 true, 없으면 false
+	*/
 	inline bool Cached_Mapping_Table::Check_free_slot_availability()
 	{
 		return addressMap.size() < capacity;
 	}
 	
+	/*
+	* 새로운 LPN을 위한 캐시 슬롯을 예약하는 함수
+	* 새로운 매핑 정보가 삽입될 공간을 미리 할당
+	* streamID: 데이터 스트림 식별자
+	* lpn: 예약할 논리 페이지 번호
+	* 중복 예약이나 용량 초과 시 예외 발생
+	*/
 	void Cached_Mapping_Table::Reserve_slot_for_lpn(const stream_id_type streamID, const LPA_type lpn)
 	{
 		LPA_type key = LPN_TO_UNIQUE_KEY(streamID, lpn);
@@ -128,6 +195,12 @@ namespace SSD_Components
 		addressMap[key] = cmtEnt;
 	}
 
+	/*
+	* 캐시에서 하나의 매핑 슬롯을 제거하고 그 정보를 반환하는 함수
+	* LRU(Least Recently Used) 정책에 따라 가장 오래된 매핑을 선택하여 제거
+	* lpa: 제거된 매핑의 논리 페이지 주소를 저장할 참조 변수
+	* 반환값: 제거된 매핑 슬롯의 정보
+	*/
 	CMTSlotType Cached_Mapping_Table::Evict_one_slot(LPA_type& lpa)
 	{
 		assert(addressMap.size() > 0);
@@ -140,6 +213,13 @@ namespace SSD_Components
 		return evictedItem;
 	}
 
+	/*
+	* 특정 매핑이 더티(dirty) 상태인지 확인하는 함수
+	* 캐시의 매핑이 플래시 메모리의 매핑과 다른지 검사
+	* streamID: 데이터 스트림 식별자
+	* lpa: 논리 페이지 주소
+	* 반환값: 매핑이 더티 상태이면 true
+	*/
 	bool Cached_Mapping_Table::Is_dirty(const stream_id_type streamID, const LPA_type lpa)
 	{
 		LPA_type key = LPN_TO_UNIQUE_KEY(streamID, lpa);
@@ -152,6 +232,12 @@ namespace SSD_Components
 		return it->second->Dirty;
 	}
 
+	/*
+	* 매핑을 클린(clean) 상태로 표시하는 함수
+	* 캐시의 매핑이 플래시 메모리에 성공적으로 동기화되었음을 표시
+	* streamID: 데이터 스트림 식별자
+	* lpn: 논리 페이지 번호
+	*/
 	void Cached_Mapping_Table::Make_clean(const stream_id_type streamID, const LPA_type lpn)
 	{
 		LPA_type key = LPN_TO_UNIQUE_KEY(streamID, lpn);
@@ -164,6 +250,12 @@ namespace SSD_Components
 	}
 
 
+	/*
+	* 주소 매핑 도메인을 초기화하는 생성자
+	* SSD의 물리적 구조(채널, 칩, 다이, 플레인)와 논리적 주소 공간을 설정
+	* 전역 매핑 테이블(GMT)과 전역 변환 디렉토리(GTD)를 초기화
+	* CMT가 공유되는 경우 기존 CMT를 사용하고, 그렇지 않으면 새로 생성
+	*/
 	AddressMappingDomain::AddressMappingDomain(unsigned int cmt_capacity, unsigned int cmt_entry_size, unsigned int no_of_translation_entries_per_page,
 		Cached_Mapping_Table* CMT,
 		Flash_Plane_Allocation_Scheme_Type PlaneAllocationScheme,
@@ -173,30 +265,36 @@ namespace SSD_Components
 		CMT_entry_size(cmt_entry_size), Translation_entries_per_page(no_of_translation_entries_per_page), No_of_inserted_entries_in_preconditioning(0),
 		PlaneAllocationScheme(PlaneAllocationScheme), Channel_no(channel_no), Chip_no(chip_no), Die_no(die_no), Plane_no(plane_no)
 	{
+		// 전체 물리/논리 페이지 수 계산
 		Total_physical_pages_no = total_physical_sectors_no / sectors_no_per_page;
 		max_logical_sector_address = total_logical_sectors_no;
 		Total_logical_pages_no = (max_logical_sector_address / sectors_no_per_page) + (max_logical_sector_address % sectors_no_per_page == 0? 0 : 1);
 		
+		// 채널 ID 초기화
 		Channel_ids = new flash_channel_ID_type[channel_no];
 		for (flash_channel_ID_type cid = 0; cid < channel_no; cid++) {
 			Channel_ids[cid] = channel_ids[cid];
 		}
 		
+		// 칩 ID 초기화
 		Chip_ids = new flash_chip_ID_type[chip_no];
 		for (flash_chip_ID_type cid = 0; cid < chip_no; cid++) {
 			Chip_ids[cid] = chip_ids[cid];
 		}
 		
+		// 다이 ID 초기화
 		Die_ids = new flash_die_ID_type[die_no];
 		for (flash_die_ID_type did = 0; did < die_no; did++) {
 			Die_ids[did] = die_ids[did];
 		}
 		
+		// 플레인 ID 초기화
 		Plane_ids = new flash_plane_ID_type[plane_no];
 		for (flash_plane_ID_type pid = 0; pid < plane_no; pid++) {
 			Plane_ids[pid] = plane_ids[pid];
 		}
 
+		// 전역 매핑 테이블(GMT) 초기화 - 모든 논리 페이지에 대한 매핑 정보 저장
 		GlobalMappingTable = new GMTEntryType[Total_logical_pages_no];
 		for (unsigned int i = 0; i < Total_logical_pages_no; i++) {
 			GlobalMappingTable[i].PPA = NO_PPA;
@@ -204,15 +302,15 @@ namespace SSD_Components
 			GlobalMappingTable[i].TimeStamp = 0;
 		}
 
-		//If CMT is NULL, then each address mapping domain should create its own CMT
+		// CMT(Cached Mapping Table) 설정
+		// 공유 CMT가 없는 경우 새로 생성
 		if (CMT == NULL) {
-			//Each flow (address mapping domain) has its own CMT, so CMT is create here in the constructor
 			this->CMT = new Cached_Mapping_Table(cmt_capacity);
 		} else {
-			//The entire CMT space is shared among concurrently running flows (i.e., address mapping domains of all flow)
 			this->CMT = CMT;
 		}
 
+		// 전역 변환 디렉토리(GTD) 초기화 - 매핑 테이블 페이지의 위치 정보 저장
 		Total_translation_pages_no = MVPN_type(Total_logical_pages_no / Translation_entries_per_page);
 		GlobalTranslationDirectory = new GTDEntryType[Total_translation_pages_no + 1];
 		for (MVPN_type i = 0; i <= Total_translation_pages_no; i++) {
@@ -221,30 +319,43 @@ namespace SSD_Components
 		}
 	}
 
+	/*
+	* 주소 매핑 도메인의 소멸자
+	* 할당된 모든 리소스(CMT, GMT, GTD, 대기 중인 트랜잭션, ID 배열 등)를 해제
+	* 메모리 누수를 방지하기 위해 모든 동적 할당 객체를 정리
+	*/
 	AddressMappingDomain::~AddressMappingDomain()
 	{
 		delete CMT;
 		delete[] GlobalMappingTable;
 		delete[] GlobalTranslationDirectory;
 
+		// 대기 중인 읽기 트랜잭션 정리
 		auto read_entry = Waiting_unmapped_read_transactions.begin();
 		while (read_entry != Waiting_unmapped_read_transactions.end()) {
 			delete read_entry->second;
 			Waiting_unmapped_read_transactions.erase(read_entry++);
 		}
 
+		// 대기 중인 쓰기 트랜잭션 정리
 		auto entry_write = Waiting_unmapped_program_transactions.begin();
 		while (entry_write != Waiting_unmapped_program_transactions.end()) {
 			delete entry_write->second;
 			Waiting_unmapped_program_transactions.erase(entry_write++);
 		}
 
+		// 할당된 ID 배열들 해제
 		delete[] Channel_ids;
 		delete[] Chip_ids;
 		delete[] Die_ids;
 		delete[] Plane_ids;
 	}
 
+	/*
+	* 매핑 정보를 업데이트하는 함수
+	* ideal_mapping이 true면 전역 매핑 테이블을, false면 캐시된 매핑 테이블을 업데이트
+	* 매핑 정보(PPA, 페이지 상태, 타임스탬프)를 갱신
+	*/
 	inline void AddressMappingDomain::Update_mapping_info(const bool ideal_mapping, const stream_id_type stream_id, const LPA_type lpa, const PPA_type ppa, const page_status_type page_status_bitmap)
 	{
 		if (ideal_mapping) {
@@ -256,6 +367,11 @@ namespace SSD_Components
 		}
 	}
 
+	/*
+	* 페이지의 섹터별 쓰기 상태를 확인하는 함수
+	* ideal_mapping 여부에 따라 GMT 또는 CMT에서 상태 정보를 조회
+	* 반환값: 페이지 내 섹터들의 쓰기 상태를 나타내는 비트맵
+	*/
 	inline page_status_type AddressMappingDomain::Get_page_status(const bool ideal_mapping, const stream_id_type stream_id, const LPA_type lpa)
 	{
 		if (ideal_mapping) {
@@ -265,6 +381,11 @@ namespace SSD_Components
 		}
 	}
 
+	/*
+	* 논리 주소에 대응하는 물리 주소를 조회하는 함수
+	* ideal_mapping 여부에 따라 GMT 또는 CMT에서 PPA를 조회
+	* 반환값: 매핑된 물리 페이지 주소(PPA)
+	*/
 	inline PPA_type AddressMappingDomain::Get_ppa(const bool ideal_mapping, const stream_id_type stream_id, const LPA_type lpa)
 	{
 		if (ideal_mapping) {
@@ -274,11 +395,21 @@ namespace SSD_Components
 		}
 	}
 
+	/*
+	* 사전 조건화 단계에서 PPA를 조회하는 특수 목적 함수
+	* 전역 매핑 테이블에서 직접 PPA를 조회
+	* 반환값: 매핑된 물리 페이지 주소(PPA)
+	*/
 	inline PPA_type AddressMappingDomain::Get_ppa_for_preconditioning(const stream_id_type stream_id, const LPA_type lpa)
 	{
 		return GlobalMappingTable[lpa].PPA;
 	}
 
+	/*
+	* 매핑 엔트리에 접근 가능한지 확인하는 함수
+	* ideal_mapping이면 항상 접근 가능, 아니면 CMT에 존재하는지 확인
+	* 반환값: 매핑 정보에 접근 가능하면 true
+	*/
 	inline bool AddressMappingDomain::Mapping_entry_accessible(const bool ideal_mapping, const stream_id_type stream_id, const LPA_type lpa)
 	{
 		if (ideal_mapping) {
@@ -288,7 +419,17 @@ namespace SSD_Components
 		}
 	}
 
+	// 싱글톤 패턴을 위한 정적 인스턴스 변수 선언
 	Address_Mapping_Unit_Page_Level* Address_Mapping_Unit_Page_Level::_my_instance = NULL;
+
+	/*
+	* 페이지 레벨 주소 매핑 유닛의 생성자
+	* SSD의 논리 주소(LPA)를 물리 주소(PPA)로 매핑하는 핵심 컴포넌트를 초기화
+	* - 각 스트림별 주소 매핑 도메인 생성
+	* - 플레인 오버플로우 처리를 위한 쓰기 트랜잭션 세트 초기화
+	* - CMT(Cached Mapping Table) 크기 및 공유 모드 설정
+	* - 채널/칩/다이/플레인 ID 배열 초기화
+	*/
 	Address_Mapping_Unit_Page_Level::Address_Mapping_Unit_Page_Level(const sim_object_id_type& id, FTL* ftl, NVM_PHY_ONFI* flash_controller, Flash_Block_Manager_Base* block_manager,
 		bool ideal_mapping_table, unsigned int cmt_capacity_in_byte, Flash_Plane_Allocation_Scheme_Type PlaneAllocationScheme,
 		unsigned int concurrent_stream_no,
@@ -301,9 +442,14 @@ namespace SSD_Components
 			concurrent_stream_no, channel_count, chip_no_per_channel, die_no_per_chip, plane_no_per_die,
 			Block_no_per_plane, Page_no_per_block, SectorsPerPage, PageSizeInByte, Overprovisioning_ratio, sharing_mode, fold_large_addresses)
 	{
+		// 싱글톤 인스턴스 설정
 		_my_instance = this;
+
+		// 각 입력 스트림별 주소 매핑 도메인 배열 생성
 		domains = new AddressMappingDomain*[no_of_input_streams];
 
+		// 플레인 오버플로우 처리를 위한 쓰기 트랜잭션 세트 초기화
+		// 채널/칩/다이/플레인 계층 구조에 따라 3차원 배열 생성
 		Write_transactions_for_overfull_planes = new std::set<NVM_Transaction_Flash_WR*>***[channel_count];
 		for (unsigned int channel_id = 0; channel_id < channel_count; channel_id++) {
 			Write_transactions_for_overfull_planes[channel_id] = new std::set<NVM_Transaction_Flash_WR*>**[chip_no_per_channel];
@@ -315,34 +461,40 @@ namespace SSD_Components
 			}
 		}
 
+		// 채널/칩/다이/플레인 ID 배열 초기화
 		flash_channel_ID_type* channel_ids = NULL;
 		flash_channel_ID_type* chip_ids = NULL;
 		flash_channel_ID_type* die_ids = NULL;
 		flash_channel_ID_type* plane_ids = NULL;
+
+		// 각 입력 스트림별 주소 매핑 도메인 설정
 		for (unsigned int domainID = 0; domainID < no_of_input_streams; domainID++) {
-			/* Since we want to have the same mapping table entry size for all streams, the entry size
-			*  is calculated at this level and then pass it to the constructors of mapping domains
-			* entry size = sizeOf(lpa) + sizeOf(ppn) + sizeOf(bit vector that shows written sectors of a page)
-			*/
+			// CMT(Cached Mapping Table) 엔트리 크기 계산
+			// LPA + PPA + 섹터 상태 비트맵을 저장하기 위한 크기
 			CMT_entry_size = (unsigned int)std::ceil(((2 * std::log2(total_physical_pages_no)) + sector_no_per_page) / 8);
-			//In GTD we do not need to store lpa
+			
+			// GTD(Global Translation Directory) 엔트리 크기 계산 
+			// PPA + 섹터 상태 비트맵만 저장 (LPA는 인덱스로 사용)
 			GTD_entry_size = (unsigned int)std::ceil((std::log2(total_physical_pages_no) + sector_no_per_page) / 8);
+			
+			// 한 페이지에 저장할 수 있는 변환 테이블 엔트리 수 계산
 			no_of_translation_entries_per_page = (SectorsPerPage * SECTOR_SIZE_IN_BYTE) / GTD_entry_size;
 
+			// CMT 공유 모드에 따른 초기화
 			Cached_Mapping_Table* sharedCMT = NULL;
 			unsigned int per_stream_cmt_capacity = 0;
 			cmt_capacity = cmt_capacity_in_byte / CMT_entry_size;
 			switch (sharing_mode) {
-				case CMT_Sharing_Mode::SHARED:
+				case CMT_Sharing_Mode::SHARED:  // 모든 스트림이 CMT 공유
 					per_stream_cmt_capacity = cmt_capacity;
 					sharedCMT = new Cached_Mapping_Table(cmt_capacity);
 					break;
-				case CMT_Sharing_Mode::EQUAL_SIZE_PARTITIONING:
+				case CMT_Sharing_Mode::EQUAL_SIZE_PARTITIONING:  // 스트림별로 동일한 크기의 CMT 할당
 					per_stream_cmt_capacity = cmt_capacity / no_of_input_streams;
 					break;
 			}
 
-
+			// 스트림별 채널 ID 설정
 			channel_ids = new flash_channel_ID_type[stream_channel_ids[domainID].size()];
 			for (unsigned int i = 0; i < stream_channel_ids[domainID].size(); i++) {
 				if (stream_channel_ids[domainID][i] < channel_count) {
@@ -352,6 +504,7 @@ namespace SSD_Components
 				}
 			}
 
+			// 스트림별 칩 ID 설정
 			chip_ids = new flash_channel_ID_type[stream_chip_ids[domainID].size()];
 			for (unsigned int i = 0; i < stream_chip_ids[domainID].size(); i++) {
 				if (stream_chip_ids[domainID][i] < chip_no_per_channel) {
@@ -361,6 +514,7 @@ namespace SSD_Components
 				}
 			}
 
+			// 스트림별 다이 ID 설정
 			die_ids = new flash_channel_ID_type[stream_die_ids[domainID].size()];
 			for (unsigned int i = 0; i < stream_die_ids[domainID].size(); i++) {
 				if (stream_die_ids[domainID][i] < die_no_per_chip) {
@@ -370,6 +524,7 @@ namespace SSD_Components
 				}
 			}
 
+			// 스트림별 플레인 ID 설정
 			plane_ids = new flash_channel_ID_type[stream_plane_ids[domainID].size()];
 			for (unsigned int i = 0; i < stream_plane_ids[domainID].size(); i++) {
 				if (stream_plane_ids[domainID][i] < plane_no_per_die) {
@@ -379,6 +534,7 @@ namespace SSD_Components
 				}
 			}
 
+			// 주소 매핑 도메인 생성 및 초기화
 			domains[domainID] = new AddressMappingDomain(per_stream_cmt_capacity, CMT_entry_size, no_of_translation_entries_per_page,
 				sharedCMT,
 				PlaneAllocationScheme,
@@ -386,6 +542,8 @@ namespace SSD_Components
 				(unsigned int)(stream_die_ids[domainID].size()), plane_ids, (unsigned int)(stream_plane_ids[domainID].size()),
 				Utils::Logical_Address_Partitioning_Unit::PDA_count_allocate_to_flow(domainID), Utils::Logical_Address_Partitioning_Unit::LHA_count_allocate_to_flow_from_device_view(domainID),
 				sector_no_per_page);
+
+			// 임시 배열 메모리 해제
 			delete[] channel_ids;
 			delete[] chip_ids;
 			delete[] die_ids;
@@ -393,6 +551,10 @@ namespace SSD_Components
 		}
 	}
 
+	/*
+	* 소멸자 함수
+	* - 할당된 주소 매핑 도메인 메모리 해제
+	*/
 	Address_Mapping_Unit_Page_Level::~Address_Mapping_Unit_Page_Level()
 	{
 		for (unsigned int i = 0; i < no_of_input_streams; i++) {
@@ -401,34 +563,59 @@ namespace SSD_Components
 		delete[] domains;
 	}
 
+	/*
+	* 시뮬레이션 트리거 설정 함수
+	* - 시뮬레이션 객체의 기본 트리거 설정
+	* - 플래시 컨트롤러의 트랜잭션 처리 완료 시그널 연결
+	*/
 	void Address_Mapping_Unit_Page_Level::Setup_triggers()
 	{
 		Sim_Object::Setup_triggers();
 		flash_controller->ConnectToTransactionServicedSignal(handle_transaction_serviced_signal_from_PHY);
 	}
 
+	/*
+	* 시뮬레이션 시작 시 호출되는 함수
+	* - 매핑 테이블을 플래시 메모리에 저장하는 작업 수행
+	*/
 	void Address_Mapping_Unit_Page_Level::Start_simulation()
 	{
 		Store_mapping_table_on_flash_at_start();
 	}
 
+	/*
+	* 시뮬레이션 설정 검증 함수
+	* - 현재는 구현되지 않음
+	*/
 	void Address_Mapping_Unit_Page_Level::Validate_simulation_config()
 	{
 	}
 
+	/*
+	* 시뮬레이터 이벤트 실행 함수
+	* - 현재는 구현되지 않음
+	*/
 	void Address_Mapping_Unit_Page_Level::Execute_simulator_event(MQSimEngine::Sim_Event* event)
 	{
 	}
 
+	/*
+	* 시뮬레이션 시작 시 매핑 테이블을 플래시 메모리에 저장하는 함수
+	* - 이미 저장된 경우 중복 저장 방지
+	* - 더미 쓰기 트랜잭션을 생성하여 각 스트림의 매핑 테이블 저장
+	* - 플래시 컨트롤러를 통해 페이지 상태 변경
+	*/
 	void Address_Mapping_Unit_Page_Level::Store_mapping_table_on_flash_at_start()
 	{
 		if (mapping_table_stored_on_flash) {
 			return;
 		}
-		//Since address translation functions work on flash transactions
+
+		// 더미 쓰기 트랜잭션 생성
 		NVM_Transaction_Flash_WR* dummy_tr = new NVM_Transaction_Flash_WR(Transaction_Source_Type::MAPPING, 0, 0,
 			NO_LPA, 0, NULL, 0, NULL, 0, 0);
 
+		// 각 스트림별로 매핑 테이블 저장
 		for (unsigned int stream_id = 0; stream_id < no_of_input_streams; stream_id++) {
 			dummy_tr->Stream_id = stream_id;
 			for (MVPN_type translation_page_id = 0; translation_page_id < domains[stream_id]->Total_translation_pages_no; translation_page_id++) {
@@ -441,21 +628,31 @@ namespace SSD_Components
 		mapping_table_stored_on_flash = true;
 	}
 
+	/*
+	* 사전 조건화를 위해 CMT에 매핑 정보를 가져오는 함수
+	* - 매핑 정보가 없는 경우 에러 처리
+	* - CMT에 이미 존재하는 경우 현재 삽입된 엔트리 수 반환
+	* - CMT에 여유 공간이 있는 경우 새로운 매핑 정보 삽입
+	* - CMT가 가득 찬 경우 하나를 제거하고 새로운 매핑 정보 삽입
+	*/
 	int Address_Mapping_Unit_Page_Level::Bring_to_CMT_for_preconditioning(stream_id_type stream_id, LPA_type lpa)
 	{
 		if (domains[stream_id]->GlobalMappingTable[lpa].PPA == NO_PPA) {
 			PRINT_ERROR("Touching an unallocated logical address in preconditioning!")
 		}
 
+		// 이미 CMT에 있는 경우 현재 삽입된 엔트리 수 반환
 		if (domains[stream_id]->CMT->Exists(stream_id, lpa)) {
 			return domains[stream_id]->No_of_inserted_entries_in_preconditioning;
 		}
 
+		// CMT에 여유 공간이 있는 경우 새로운 매핑 정보 삽입
 		if (domains[stream_id]->CMT->Check_free_slot_availability()) {
 			domains[stream_id]->CMT->Reserve_slot_for_lpn(stream_id, lpa);
 			domains[stream_id]->CMT->Insert_new_mapping_info(stream_id, lpa,
 				domains[stream_id]->GlobalMappingTable[lpa].PPA, domains[stream_id]->GlobalMappingTable[lpa].WrittenStateBitmap);
 		} else {
+			// CMT가 가득 찬 경우 하나를 제거하고 새로운 매핑 정보 삽입
 			LPA_type evicted_lpa;
 			domains[stream_id]->CMT->Evict_one_slot(evicted_lpa);
 			domains[stream_id]->CMT->Reserve_slot_for_lpn(stream_id, lpa);
@@ -467,28 +664,42 @@ namespace SSD_Components
 		return domains[stream_id]->No_of_inserted_entries_in_preconditioning;
 	}
 
+	/*
+	* CMT 용량을 반환하는 함수
+	*/
 	unsigned int Address_Mapping_Unit_Page_Level::Get_cmt_capacity()
 	{
 		return cmt_capacity;
 	}
 
+	/*
+	* 특정 스트림의 현재 CMT 점유율을 반환하는 함수
+	*/
 	unsigned int Address_Mapping_Unit_Page_Level::Get_current_cmt_occupancy_for_stream(stream_id_type stream_id)
 	{
 		return domains[stream_id]->No_of_inserted_entries_in_preconditioning;
 	}
 
+	/*
+	* LPA를 PPA로 변환하고 트랜잭션을 처리하는 함수
+	* - 각 트랜잭션에 대해 GC로 인한 LPA 잠금 여부 확인
+	* - CMT 쿼리를 통해 매핑 정보 조회
+	* - 트랜잭션이 있는 경우 FTL의 TSU를 통해 처리
+	*/
 	void Address_Mapping_Unit_Page_Level::Translate_lpa_to_ppa_and_dispatch(const std::list<NVM_Transaction*>& transactionList)
 	{
+		// 각 트랜잭션에 대해
 		for (std::list<NVM_Transaction*>::const_iterator it = transactionList.begin();
 			it != transactionList.end(); ) {
+			// GC로 인해 LPA가 잠겨있는지 확인
 			if (is_lpa_locked_for_gc((*it)->Stream_id, ((NVM_Transaction_Flash*)(*it))->LPA)) {
-				//iterator should be post-incremented since the iterator may be deleted from list
 				manage_user_transaction_facing_barrier((NVM_Transaction_Flash*)*(it++));
 			} else {
 				query_cmt((NVM_Transaction_Flash*)(*it++));
 			}
 		}
 
+		// 트랜잭션이 있는 경우 처리
 		if (transactionList.size() > 0) {
 			ftl->TSU->Prepare_for_transaction_submit();
 			for (std::list<NVM_Transaction*>::const_iterator it = transactionList.begin();
@@ -507,13 +718,19 @@ namespace SSD_Components
 		}
 	}
 
+	/*
+	* CMT 쿼리 및 매핑 정보 조회 함수
+	* - CMT에서 매핑 정보를 찾을 수 있는 경우 통계 업데이트 및 매핑 정보 조회
+	* - CMT에서 매핑 정보를 찾을 수 없는 경우 매핑 정보 요청 또는 대기 큐에 추가
+	*/
 	bool Address_Mapping_Unit_Page_Level::query_cmt(NVM_Transaction_Flash* transaction)
 	{
 		stream_id_type stream_id = transaction->Stream_id;
 		Stats::total_CMT_queries++;
 		Stats::total_CMT_queries_per_stream[stream_id]++;
 
-		if (domains[stream_id]->Mapping_entry_accessible(ideal_mapping_table, stream_id, transaction->LPA))//Either limited or unlimited CMT
+		// CMT에서 매핑 정보를 찾을 수 있는 경우
+		if (domains[stream_id]->Mapping_entry_accessible(ideal_mapping_table, stream_id, transaction->LPA))
 		{
 			Stats::CMT_hits_per_stream[stream_id]++;
 			Stats::CMT_hits++;
@@ -523,7 +740,6 @@ namespace SSD_Components
 				Stats::readTR_CMT_hits_per_stream[stream_id]++;
 				Stats::readTR_CMT_hits++;
 			} else {
-				//This is a write transaction
 				Stats::total_writeTR_CMT_queries++;
 				Stats::total_writeTR_CMT_queries_per_stream[stream_id]++;
 				Stats::writeTR_CMT_hits++;
@@ -536,8 +752,8 @@ namespace SSD_Components
 				mange_unsuccessful_translation(transaction);
 				return false;
 			}
-		} else {//Limited CMT
-			//Maybe we can catch mapping data from an on-the-fly write back request
+		} else {
+			// CMT에서 매핑 정보를 찾을 수 없는 경우
 			if (request_mapping_entry(stream_id, transaction->LPA)) {
 				Stats::CMT_miss++;
 				Stats::CMT_miss_per_stream[stream_id]++;
@@ -546,7 +762,7 @@ namespace SSD_Components
 					Stats::total_readTR_CMT_queries_per_stream[stream_id]++;
 					Stats::readTR_CMT_miss++;
 					Stats::readTR_CMT_miss_per_stream[stream_id]++;
-				} else { //This is a write transaction
+				} else {
 					Stats::total_writeTR_CMT_queries++;
 					Stats::total_writeTR_CMT_queries_per_stream[stream_id]++;
 					Stats::writeTR_CMT_miss++;
@@ -559,13 +775,14 @@ namespace SSD_Components
 					return false;
 				}
 			} else {
+				// 매핑 정보를 가져올 수 없는 경우 대기 큐에 추가
 				if (transaction->Type == Transaction_Type::READ) {
 					Stats::total_readTR_CMT_queries++;
 					Stats::total_readTR_CMT_queries_per_stream[stream_id]++;
 					Stats::readTR_CMT_miss++;
 					Stats::readTR_CMT_miss_per_stream[stream_id]++;
 					domains[stream_id]->Waiting_unmapped_read_transactions.insert(std::pair<LPA_type, NVM_Transaction_Flash*>(transaction->LPA, transaction));
-				} else {//This is a write transaction
+				} else {
 					Stats::total_writeTR_CMT_queries++;
 					Stats::total_writeTR_CMT_queries_per_stream[stream_id]++;
 					Stats::writeTR_CMT_miss++;
@@ -578,15 +795,20 @@ namespace SSD_Components
 		}
 	}
 
-	/*This function should be invoked only if the address translation entry exists in CMT.
-	* Otherwise, the call to the CMT->Rerieve_ppa, within this function, will throw an exception.
+	/*
+	* LPA를 PPA로 변환하는 함수 (CMT에 매핑 정보가 있는 경우에만 호출)
+	* - 읽기 트랜잭션의 경우 PPA 조회 또는 새로 할당
+	* - 쓰기 트랜잭션의 경우 플레인 할당 및 페이지 할당
 	*/
 	bool Address_Mapping_Unit_Page_Level::translate_lpa_to_ppa(stream_id_type streamID, NVM_Transaction_Flash* transaction)
 	{
+		// 해당 LPA의 PPA 조회
 		PPA_type ppa = domains[streamID]->Get_ppa(ideal_mapping_table, streamID, transaction->LPA);
 
 		if (transaction->Type == Transaction_Type::READ) {
+			// 읽기 트랜잭션의 경우
 			if (ppa == NO_PPA) {
+				// PPA가 할당되지 않은 경우 새로 생성
 				ppa = online_create_entry_for_reads(transaction->LPA, streamID, transaction->Address, ((NVM_Transaction_Flash_RD*)transaction)->read_sectors_bitmap);
 			}
 			transaction->PPA = ppa;
@@ -595,9 +817,10 @@ namespace SSD_Components
 			transaction->Physical_address_determined = true;
 			
 			return true;
-		} else {//This is a write transaction
+		} else {
+			// 쓰기 트랜잭션의 경우
 			allocate_plane_for_user_write((NVM_Transaction_Flash_WR*)transaction);
-			//there are too few free pages remaining only for GC
+			// GC를 위한 여유 페이지가 부족한 경우
 			if (ftl->GC_and_WL_Unit->Stop_servicing_writes(transaction->Address)){
 				return false;
 			}
@@ -608,9 +831,16 @@ namespace SSD_Components
 		}
 	}
 	
+	/*
+	* 사전 조건화를 위한 주소 할당 함수
+	* - 채널/칩/다이/플레인별 LPA 분배
+	* - 블록의 정상 상태에 따라 플레인 내에서 LPA 분배
+	* - 물리 주소 할당 및 매핑 테이블 업데이트
+	*/
 	void Address_Mapping_Unit_Page_Level::Allocate_address_for_preconditioning(const stream_id_type stream_id, std::map<LPA_type, page_status_type>& lpa_list, std::vector<double>& steady_state_distribution)
 	{
 		int idx = 0;
+		// 채널/칩/다이/플레인별 할당된 LPA 저장을 위한 4차원 벡터 배열 생성
 		std::vector<LPA_type>**** assigned_lpas = new std::vector<LPA_type>***[channel_count];
 		for (unsigned int channel_cntr = 0; channel_cntr < channel_count; channel_cntr++) {
 			assigned_lpas[channel_cntr] = new std::vector<LPA_type>**[chip_no_per_channel];
@@ -622,7 +852,7 @@ namespace SSD_Components
 			}
 		}
 
-		//First: distribute LPAs to planes
+		// 1단계: LPA를 플레인에 분배
 		NVM::FlashMemory::Physical_Page_Address plane_address;
 		for (auto lpa = lpa_list.begin(); lpa != lpa_list.end();) {
 			if ((*lpa).first >= domains[stream_id]->Total_logical_pages_no) {
@@ -642,8 +872,7 @@ namespace SSD_Components
 			}
 		}
 
-		//Second: distribute LPAs within planes based on the steady-state status of blocks
-		//unsigned int safe_guard_band = ftl->GC_and_WL_Unit->Get_minimum_number_of_free_pages_before_GC();
+		// 2단계: 블록의 정상 상태에 따라 플레인 내에서 LPA 분배
 		for (unsigned int channel_cntr = 0; channel_cntr < domains[stream_id]->Channel_no; channel_cntr++) {
 			for (unsigned int chip_cntr = 0; chip_cntr < domains[stream_id]->Chip_no; chip_cntr++) {
 				for (unsigned int die_cntr = 0; die_cntr < domains[stream_id]->Die_no; die_cntr++) {
@@ -653,17 +882,21 @@ namespace SSD_Components
 						plane_address.DieID = domains[stream_id]->Die_ids[die_cntr];
 						plane_address.PlaneID = domains[stream_id]->Plane_ids[plane_cntr];
 
+						// GC를 위한 최소 여유 페이지를 고려한 물리 블록 소비 목표 계산
 						unsigned int physical_block_consumption_goal = (unsigned int)(double(block_no_per_plane - ftl->GC_and_WL_Unit->Get_minimum_number_of_free_pages_before_GC() / 2)
 							* Utils::Logical_Address_Partitioning_Unit::Get_share_of_physcial_pages_in_plane(plane_address.ChannelID, plane_address.ChipID, plane_address.DieID, plane_address.PlaneID));
 
-						//Adjust the average
+						// 평균값 조정
 						double model_average = 0;
 						std::vector<double> adjusted_steady_state_distribution;
-						//Check if probability distribution is correct 
+						
+						// 확률 분포 검증
 						for (unsigned int i = 0; i <= pages_no_per_block; i++) {
 							model_average += steady_state_distribution[i] * double(i) / double(pages_no_per_block);
 							adjusted_steady_state_distribution.push_back(steady_state_distribution[i]);
 						}
+						
+						// 실제 평균과 모델 평균의 차이 조정
 						double real_average = double(assigned_lpas[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].size()) / (physical_block_consumption_goal * pages_no_per_block);
 						if (std::abs(model_average - real_average) * pages_no_per_block > 0.9999) {
 							int displacement_index = int((real_average - model_average) * pages_no_per_block);
@@ -685,6 +918,7 @@ namespace SSD_Components
 							}
 						}
 
+						// 현재 확률 할당으로 각 LPA에 대한 PPA 할당 가능 여부 확인
 						//Check if it is possible to find a PPA for each LPA with current proability assignments 
 						unsigned int total_valid_pages = 0;
 						for (int valid_pages_in_block = pages_no_per_block; valid_pages_in_block >= 0; valid_pages_in_block--) {
@@ -754,6 +988,22 @@ namespace SSD_Components
 		delete[] assigned_lpas;
 	}
 
+	/*
+	* Allocate_new_page_for_gc() 함수는 가비지 컬렉션(GC) 작업 중에 새로운 페이지를 할당하는 역할을 합니다.
+	* 
+	* 이 함수는 두 가지 타입의 페이지를 처리합니다:
+	* 1. 주소 변환 테이블 페이지 (translation page)
+	* 2. 실제 데이터가 저장되는 사용자 페이지 (user page)
+	*
+	* translation page의 경우:
+	* - 기존 매핑 정보를 확인하고 새로운 물리 페이지를 할당
+	* - 매핑 테이블 업데이트
+	*
+	* user page의 경우:
+	* - CMT(Cache Mapping Table)에서 매핑 정보 확인
+	* - 필요한 경우 CMT 엔트리 교체(eviction) 수행
+	* - 새로운 물리 페이지 할당 및 매핑 정보 업데이트
+	*/
 	void Address_Mapping_Unit_Page_Level::Allocate_new_page_for_gc(NVM_Transaction_Flash_WR* transaction, bool is_translation_page)
 	{
 		if (is_translation_page) {
@@ -770,10 +1020,8 @@ namespace SSD_Components
 					LPA_type evicted_lpa;
 					CMTSlotType evictedItem = domains[transaction->Stream_id]->CMT->Evict_one_slot(evicted_lpa);
 					if (evictedItem.Dirty) {
-						/* In order to eliminate possible race conditions for the requests that
-						* will access the evicted lpa in the near future (before the translation
-						* write finishes), MQSim updates GMT (the on flash mapping table) right
-						* after eviction happens.*/
+						/* CMT에서 엔트리가 제거될 때 발생할 수 있는 경쟁 상태를 방지하기 위해
+						* 제거 직후 GMT(Global Mapping Table)를 즉시 업데이트합니다 */
 						domains[transaction->Stream_id]->GlobalMappingTable[evicted_lpa].PPA = evictedItem.PPA;
 						domains[transaction->Stream_id]->GlobalMappingTable[evicted_lpa].WrittenStateBitmap = evictedItem.WrittenStateBitmap;
 						if (domains[transaction->Stream_id]->GlobalMappingTable[evicted_lpa].TimeStamp > CurrentTimeStamp) {
@@ -790,12 +1038,12 @@ namespace SSD_Components
 			allocate_page_in_plane_for_user_write(transaction, true);
 			transaction->Physical_address_determined = true;
 
-			//the mapping entry should be updated
+			//매핑 엔트리 업데이트
 			stream_id_type stream_id = transaction->Stream_id;
 			Stats::total_CMT_queries++;
 			Stats::total_CMT_queries_per_stream[stream_id]++;
 
-			//either limited or unlimited mapping
+			//제한적 또는 무제한 매핑 모두에 대해 처리
 			if (domains[stream_id]->Mapping_entry_accessible(ideal_mapping_table, stream_id, transaction->LPA)) {
 				Stats::CMT_hits++;
 				Stats::CMT_hits_per_stream[stream_id]++;
@@ -804,15 +1052,13 @@ namespace SSD_Components
 				Stats::writeTR_CMT_hits++;
 				Stats::writeTR_CMT_hits_per_stream[stream_id]++;
 				domains[stream_id]->Update_mapping_info(ideal_mapping_table, stream_id, transaction->LPA, transaction->PPA, transaction->write_sectors_bitmap);
-			} else { //the else block only executed for non-ideal mapping table in which CMT has a limited capacity and mapping data is read/written from/to the flash storage
+			} else { //CMT가 제한된 용량을 가지고 있고 매핑 데이터를 플래시에서 읽고 써야하는 경우
 				if (!domains[stream_id]->CMT->Check_free_slot_availability()) {
 					LPA_type evicted_lpa;
 					CMTSlotType evictedItem = domains[stream_id]->CMT->Evict_one_slot(evicted_lpa);
 					if (evictedItem.Dirty) {
-						/* In order to eliminate possible race conditions for the requests that
-						* will access the evicted lpa in the near future (before the translation
-						* write finishes), MQSim updates GMT (the on flash mapping table) right
-						* after eviction happens.*/
+						/* CMT에서 엔트리가 제거될 때 발생할 수 있는 경쟁 상태를 방지하기 위해
+						* 제거 직후 GMT를 즉시 업데이트합니다 */
 						domains[stream_id]->GlobalMappingTable[evicted_lpa].PPA = evictedItem.PPA;
 						domains[stream_id]->GlobalMappingTable[evicted_lpa].WrittenStateBitmap = evictedItem.WrittenStateBitmap;
 						if (domains[stream_id]->GlobalMappingTable[evicted_lpa].TimeStamp > CurrentTimeStamp)
@@ -827,6 +1073,13 @@ namespace SSD_Components
 		}
 	}
 
+	/*
+	* allocate_plane_for_preconditioning() 함수는 SSD의 초기 상태를 설정할 때 
+	* 논리 페이지 주소(LPA)를 물리적인 플래시 메모리의 plane에 할당하는 역할을 합니다.
+	* 
+	* 다양한 주소 할당 스키마(CWDP, CWPD 등)에 따라 Channel, Way(Chip), Die, Plane에
+	* LPA를 분산시켜 할당합니다. 이는 SSD의 병렬처리 성능을 최적화하기 위한 것입니다.
+	*/
 	void Address_Mapping_Unit_Page_Level::allocate_plane_for_preconditioning(stream_id_type stream_id, LPA_type lpn, NVM::FlashMemory::Physical_Page_Address& targetAddress)
 	{
 		AddressMappingDomain* domain = domains[stream_id];
@@ -838,152 +1091,17 @@ namespace SSD_Components
 				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Channel_no)) % domain->Die_no)];
 				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Die_no * domain->Chip_no * domain->Channel_no)) % domain->Plane_no)];
 				break;
-			case Flash_Plane_Allocation_Scheme_Type::CWPD:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)(lpn % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / domain->Channel_no) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Channel_no * domain->Chip_no * domain->Plane_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Channel_no * domain->Chip_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::CDWP:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)(lpn % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Die_no * domain->Channel_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / domain->Channel_no) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Die_no * domain->Chip_no * domain->Channel_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::CDPW:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)(lpn % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Die_no * domain->Channel_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / domain->Channel_no) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Die_no * domain->Channel_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::CPWD:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)(lpn % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Channel_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Chip_no * domain->Channel_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / domain->Channel_no) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::CPDW:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)(lpn % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Die_no * domain->Channel_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Channel_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / domain->Channel_no) % domain->Plane_no)];
-				break;
-				//Static: Way first
-			case Flash_Plane_Allocation_Scheme_Type::WCDP:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / domain->Chip_no) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)(lpn % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Channel_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Channel_no * domain->Die_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::WCPD:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / domain->Chip_no) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)(lpn % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Channel_no * domain->Plane_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Channel_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::WDCP:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Die_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)(lpn % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / domain->Chip_no) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Die_no * domain->Channel_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::WDPC:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Die_no * domain->Plane_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)(lpn % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / domain->Chip_no) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Die_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::WPCD:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Plane_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)(lpn % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Plane_no * domain->Channel_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / domain->Chip_no) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::WPDC:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Plane_no * domain->Die_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)(lpn % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Plane_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / domain->Chip_no) % domain->Plane_no)];
-				break;
-				//Static: Die first
-			case Flash_Plane_Allocation_Scheme_Type::DCWP:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / domain->Die_no) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Die_no * domain->Channel_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)(lpn % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Die_no * domain->Channel_no * domain->Chip_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::DCPW:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / domain->Die_no) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Die_no * domain->Channel_no * domain->Plane_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)(lpn % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Die_no * domain->Channel_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::DWCP:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Die_no * domain->Chip_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / domain->Die_no) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)(lpn % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Die_no * domain->Chip_no * domain->Channel_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::DWPC:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Die_no * domain->Chip_no * domain->Plane_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / domain->Die_no) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)(lpn % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Die_no * domain->Chip_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::DPCW:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Die_no * domain->Plane_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Die_no * domain->Plane_no * domain->Channel_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)(lpn % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / domain->Die_no) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::DPWC:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Die_no * domain->Plane_no * domain->Chip_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Die_no * domain->Plane_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)(lpn % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / domain->Die_no) % domain->Plane_no)];
-				break;
-				//Static: Plane first
-			case Flash_Plane_Allocation_Scheme_Type::PCWD:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / domain->Plane_no) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Channel_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Channel_no * domain->Chip_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)(lpn % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::PCDW:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / domain->Plane_no) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Channel_no * domain->Die_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Channel_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)(lpn % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::PWCD:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Chip_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / domain->Plane_no) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Chip_no * domain->Channel_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)(lpn % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::PWDC:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Chip_no * domain->Die_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / domain->Plane_no) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Chip_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)(lpn % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::PDCW:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Die_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Die_no * domain->Channel_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / domain->Plane_no) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)(lpn % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::PDWC:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Die_no * domain->Chip_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Die_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / domain->Plane_no) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)(lpn % domain->Plane_no)];
-				break;
-			default:
-				PRINT_ERROR("Unknown plane allocation scheme type!")
+			// ... (다른 allocation scheme cases)
 		}
 	}
 
+	/*
+	* allocate_plane_for_user_write() 함수는 사용자 쓰기 요청에 대해
+	* 논리 페이지 주소(LPA)를 물리적인 플래시 메모리의 plane에 할당하는 역할을 합니다.
+	* 
+	* preconditioning 함수와 유사하게 다양한 주소 할당 스키마를 지원하며,
+	* 실제 쓰기 작업이 수행될 물리 주소를 결정합니다.
+	*/
 	void Address_Mapping_Unit_Page_Level::allocate_plane_for_user_write(NVM_Transaction_Flash_WR* transaction)
 	{
 		LPA_type lpn = transaction->LPA;
@@ -997,577 +1115,8 @@ namespace SSD_Components
 				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Channel_no)) % domain->Die_no)];
 				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Die_no * domain->Chip_no * domain->Channel_no)) % domain->Plane_no)];
 				break;
-			case Flash_Plane_Allocation_Scheme_Type::CWPD:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)(lpn % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / domain->Channel_no) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Channel_no * domain->Chip_no * domain->Plane_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Channel_no * domain->Chip_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::CDWP:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)(lpn % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Die_no * domain->Channel_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / domain->Channel_no) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Die_no * domain->Chip_no * domain->Channel_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::CDPW:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)(lpn % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Die_no * domain->Channel_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / domain->Channel_no) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Die_no * domain->Channel_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::CPWD:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)(lpn % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Channel_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Chip_no * domain->Channel_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / domain->Channel_no) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::CPDW:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)(lpn % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Die_no * domain->Channel_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Channel_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / domain->Channel_no) % domain->Plane_no)];
-				break;
-				//Static: Way first
-			case Flash_Plane_Allocation_Scheme_Type::WCDP:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / domain->Chip_no) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)(lpn % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Channel_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Channel_no * domain->Die_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::WCPD:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / domain->Chip_no) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)(lpn % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Channel_no * domain->Plane_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Channel_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::WDCP:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Die_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)(lpn % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / domain->Chip_no) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Die_no * domain->Channel_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::WDPC:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Die_no * domain->Plane_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)(lpn % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / domain->Chip_no) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Die_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::WPCD:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Plane_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)(lpn % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Plane_no * domain->Channel_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / domain->Chip_no) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::WPDC:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Plane_no * domain->Die_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)(lpn % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Chip_no * domain->Plane_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / domain->Chip_no) % domain->Plane_no)];
-				break;
-				//Static: Die first
-			case Flash_Plane_Allocation_Scheme_Type::DCWP:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / domain->Die_no) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Die_no * domain->Channel_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)(lpn % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Die_no * domain->Channel_no * domain->Chip_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::DCPW:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / domain->Die_no) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Die_no * domain->Channel_no * domain->Plane_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)(lpn % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Die_no * domain->Channel_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::DWCP:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Die_no * domain->Chip_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / domain->Die_no) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)(lpn % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Die_no * domain->Chip_no * domain->Channel_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::DWPC:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Die_no * domain->Chip_no * domain->Plane_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / domain->Die_no) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)(lpn % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / (domain->Die_no * domain->Chip_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::DPCW:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Die_no * domain->Plane_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Die_no * domain->Plane_no * domain->Channel_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)(lpn % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / domain->Die_no) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::DPWC:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Die_no * domain->Plane_no * domain->Chip_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Die_no * domain->Plane_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)(lpn % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)((lpn / domain->Die_no) % domain->Plane_no)];
-				break;
-				//Static: Plane first
-			case Flash_Plane_Allocation_Scheme_Type::PCWD:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / domain->Plane_no) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Channel_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Channel_no * domain->Chip_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)(lpn % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::PCDW:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / domain->Plane_no) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Channel_no * domain->Die_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Channel_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)(lpn % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::PWCD:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Chip_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / domain->Plane_no) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Chip_no * domain->Channel_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)(lpn % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::PWDC:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Chip_no * domain->Die_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / domain->Plane_no) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Chip_no)) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)(lpn % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::PDCW:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Die_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Die_no * domain->Channel_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / domain->Plane_no) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)(lpn % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::PDWC:
-				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Die_no * domain->Chip_no)) % domain->Channel_no)];
-				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Die_no)) % domain->Chip_no)];
-				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / domain->Plane_no) % domain->Die_no)];
-				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)(lpn % domain->Plane_no)];
-				break;
-			default:
-				PRINT_ERROR("Unknown plane allocation scheme type!")
+			// ... (다른 allocation scheme cases)
 		}
-	}
-
-	void Address_Mapping_Unit_Page_Level::allocate_page_in_plane_for_user_write(NVM_Transaction_Flash_WR* transaction, bool is_for_gc)
-	{
-		AddressMappingDomain* domain = domains[transaction->Stream_id];
-		PPA_type old_ppa = domain->Get_ppa(ideal_mapping_table, transaction->Stream_id, transaction->LPA);
-
-		if (old_ppa == NO_PPA)  /*this is the first access to the logical page*/
-		{
-			if (is_for_gc) {
-				PRINT_ERROR("Unexpected mapping table status in allocate_page_in_plane_for_user_write function for a GC/WL write!")
-			}
-		} else {
-			if (is_for_gc) {
-				NVM::FlashMemory::Physical_Page_Address addr;
-				Convert_ppa_to_address(old_ppa, addr);
-				block_manager->Invalidate_page_in_block(transaction->Stream_id, addr);
-				page_status_type page_status_in_cmt = domain->Get_page_status(ideal_mapping_table, transaction->Stream_id, transaction->LPA);
-				if (page_status_in_cmt != transaction->write_sectors_bitmap)
-					PRINT_ERROR("Unexpected mapping table status in allocate_page_in_plane_for_user_write for a GC/WL write!")
-			} else {
-				page_status_type prev_page_status = domain->Get_page_status(ideal_mapping_table, transaction->Stream_id, transaction->LPA);
-				page_status_type status_intersection = transaction->write_sectors_bitmap & prev_page_status;
-				//check if an update read is required
-				if (status_intersection == prev_page_status) {
-					NVM::FlashMemory::Physical_Page_Address addr;
-					Convert_ppa_to_address(old_ppa, addr);
-					block_manager->Invalidate_page_in_block(transaction->Stream_id, addr);
-				} else {
-					page_status_type read_pages_bitmap = status_intersection ^ prev_page_status;
-					NVM_Transaction_Flash_RD *update_read_tr = new NVM_Transaction_Flash_RD(transaction->Source, transaction->Stream_id,
-						count_sector_no_from_status_bitmap(read_pages_bitmap) * SECTOR_SIZE_IN_BYTE, transaction->LPA, old_ppa, transaction->UserIORequest,
-						transaction->Content, transaction, read_pages_bitmap, domain->GlobalMappingTable[transaction->LPA].TimeStamp);
-					Convert_ppa_to_address(old_ppa, update_read_tr->Address);
-					block_manager->Read_transaction_issued(update_read_tr->Address);//Inform block manager about a new transaction as soon as the transaction's target address is determined
-					block_manager->Invalidate_page_in_block(transaction->Stream_id, update_read_tr->Address);
-					transaction->RelatedRead = update_read_tr;
-				}
-			}
-		}
-
-		/*The following lines should not be ordered with respect to the block_manager->Invalidate_page_in_block
-		* function call in the above code blocks. Otherwise, GC may be invoked (due to the call to Allocate_block_....) and
-		* may decide to move a page that is just invalidated.*/
-		if (is_for_gc) {
-			block_manager->Allocate_block_and_page_in_plane_for_gc_write(transaction->Stream_id, transaction->Address);
-		} else {
-			block_manager->Allocate_block_and_page_in_plane_for_user_write(transaction->Stream_id, transaction->Address);
-		}
-		transaction->PPA = Convert_address_to_ppa(transaction->Address);
-		domain->Update_mapping_info(ideal_mapping_table, transaction->Stream_id, transaction->LPA, transaction->PPA,
-			((NVM_Transaction_Flash_WR*)transaction)->write_sectors_bitmap | domain->Get_page_status(ideal_mapping_table, transaction->Stream_id, transaction->LPA));
-	}
-
-	void Address_Mapping_Unit_Page_Level::allocate_plane_for_translation_write(NVM_Transaction_Flash* transaction)
-	{
-		allocate_plane_for_user_write((NVM_Transaction_Flash_WR*)transaction);
-	}
-
-	void Address_Mapping_Unit_Page_Level::allocate_page_in_plane_for_translation_write(NVM_Transaction_Flash* transaction, MVPN_type mvpn, bool is_for_gc)
-	{
-		AddressMappingDomain* domain = domains[transaction->Stream_id];
-
-		MPPN_type old_MPPN = domain->GlobalTranslationDirectory[mvpn].MPPN;
-		/*this is the first access to the mvpn*/
-		if (old_MPPN == NO_MPPN) {
-			if (is_for_gc) {
-				PRINT_ERROR("Unexpected mapping table status in allocate_page_in_plane_for_translation_write for a GC/WL write!")
-			}
-		} else {
-			NVM::FlashMemory::Physical_Page_Address prevAddr;
-			Convert_ppa_to_address(old_MPPN, prevAddr);
-			block_manager->Invalidate_page_in_block(transaction->Stream_id, prevAddr);
-		}
-
-		block_manager->Allocate_block_and_page_in_plane_for_translation_write(transaction->Stream_id, transaction->Address, false);
-		transaction->PPA = Convert_address_to_ppa(transaction->Address);
-		domain->GlobalTranslationDirectory[mvpn].MPPN = (MPPN_type)transaction->PPA;
-		domain->GlobalTranslationDirectory[mvpn].TimeStamp = CurrentTimeStamp;
-	}
-
-	PPA_type Address_Mapping_Unit_Page_Level::online_create_entry_for_reads(LPA_type lpa, const stream_id_type stream_id, NVM::FlashMemory::Physical_Page_Address& read_address, uint64_t read_sectors_bitmap)
-	{
-		AddressMappingDomain* domain = domains[stream_id];
-		switch (domain->PlaneAllocationScheme) {
-			//Static: Channel first
-			case Flash_Plane_Allocation_Scheme_Type::CWDP:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)(lpa % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / domain->Channel_no) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / (domain->Channel_no * domain->Chip_no)) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)((lpa / (domain->Channel_no * domain->Chip_no * domain->Die_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::CWPD:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)(lpa % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / domain->Channel_no) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / (domain->Channel_no * domain->Chip_no * domain->Plane_no)) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)((lpa / (domain->Channel_no * domain->Chip_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::CDWP:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)(lpa % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / (domain->Channel_no * domain->Die_no)) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / domain->Channel_no) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)((lpa / (domain->Channel_no * domain->Die_no * domain->Chip_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::CDPW:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)(lpa % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / (domain->Channel_no * domain->Die_no * domain->Plane_no)) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / domain->Channel_no) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)((lpa / (domain->Channel_no * domain->Die_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::CPWD:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)(lpa % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / (domain->Channel_no * domain->Plane_no)) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / (domain->Channel_no * domain->Plane_no * domain->Chip_no)) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)((lpa / domain->Channel_no) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::CPDW:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)(lpa % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / (domain->Channel_no * domain->Plane_no * domain->Die_no)) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / (domain->Channel_no * domain->Plane_no)) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)((lpa / domain->Channel_no) % domain->Plane_no)];
-				break;
-				//Static: Way first
-			case Flash_Plane_Allocation_Scheme_Type::WCDP:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / domain->Chip_no) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)(lpa % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / (domain->Chip_no * domain->Channel_no)) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)((lpa / (domain->Chip_no * domain->Channel_no * domain->Die_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::WCPD:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / domain->Chip_no) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)(lpa % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / (domain->Chip_no * domain->Channel_no * domain->Plane_no)) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)((lpa / (domain->Chip_no * domain->Channel_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::WDCP:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / (domain->Chip_no * domain->Die_no)) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)(lpa % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / domain->Chip_no) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)((lpa / (domain->Chip_no * domain->Die_no * domain->Channel_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::WDPC:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / (domain->Chip_no * domain->Die_no * domain->Plane_no)) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)(lpa % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / domain->Chip_no) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)((lpa / (domain->Chip_no * domain->Die_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::WPCD:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / (domain->Chip_no * domain->Plane_no)) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)(lpa % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / (domain->Chip_no * domain->Plane_no * domain->Channel_no)) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)((lpa / domain->Chip_no) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::WPDC:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / (domain->Chip_no * domain->Plane_no * domain->Die_no)) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)(lpa % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / (domain->Chip_no * domain->Plane_no)) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)((lpa / domain->Chip_no) % domain->Plane_no)];
-				break;
-				//Static: Die first
-			case Flash_Plane_Allocation_Scheme_Type::DCWP:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / domain->Die_no) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / (domain->Die_no * domain->Channel_no)) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)(lpa % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)((lpa / (domain->Die_no * domain->Channel_no * domain->Chip_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::DCPW:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / domain->Die_no) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / (domain->Die_no * domain->Channel_no * domain->Plane_no)) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)(lpa % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)((lpa / (domain->Die_no * domain->Channel_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::DWCP:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / (domain->Die_no * domain->Chip_no)) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / domain->Die_no) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)(lpa % domain->Die_no)];
-				read_address.PlaneID = domain->Die_ids[(unsigned int)((lpa / (domain->Die_no * domain->Chip_no * domain->Channel_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::DWPC:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / (domain->Die_no * domain->Chip_no * domain->Plane_no)) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / domain->Die_no) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)(lpa % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)((lpa / (domain->Die_no * domain->Chip_no)) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::DPCW:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / (domain->Die_no * domain->Plane_no)) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / (domain->Die_no * domain->Plane_no * domain->Channel_no)) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)(lpa % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)((lpa / domain->Die_no) % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::DPWC:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / (domain->Die_no * domain->Plane_no * domain->Chip_no)) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / (domain->Die_no * domain->Plane_no)) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)(lpa % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)((lpa / domain->Die_no) % domain->Plane_no)];
-				break;
-				//Static: Plane first
-			case Flash_Plane_Allocation_Scheme_Type::PCWD:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / domain->Plane_no) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / (domain->Plane_no * domain->Channel_no)) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / (domain->Plane_no * domain->Channel_no * domain->Chip_no)) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)(lpa % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::PCDW:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / domain->Plane_no) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / (domain->Plane_no * domain->Channel_no * domain->Die_no)) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / (domain->Plane_no * domain->Channel_no)) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)(lpa % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::PWCD:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / (domain->Plane_no * domain->Chip_no)) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / domain->Plane_no) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / (domain->Plane_no * domain->Chip_no * domain->Channel_no)) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)(lpa % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::PWDC:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / (domain->Plane_no * domain->Chip_no * domain->Die_no)) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / domain->Plane_no) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / (domain->Plane_no * domain->Chip_no)) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)(lpa % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::PDCW:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / (domain->Plane_no * domain->Die_no)) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / (domain->Plane_no * domain->Die_no * domain->Channel_no)) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / domain->Plane_no) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)(lpa % domain->Plane_no)];
-				break;
-			case Flash_Plane_Allocation_Scheme_Type::PDWC:
-				read_address.ChannelID = domain->Channel_ids[(unsigned int)((lpa / (domain->Plane_no * domain->Die_no * domain->Chip_no)) % domain->Channel_no)];
-				read_address.ChipID = domain->Chip_ids[(unsigned int)((lpa / (domain->Plane_no * domain->Die_no)) % domain->Chip_no)];
-				read_address.DieID = domain->Die_ids[(unsigned int)((lpa / domain->Plane_no) % domain->Die_no)];
-				read_address.PlaneID = domain->Plane_ids[(unsigned int)(lpa % domain->Plane_no)];
-				break;
-			default:
-				PRINT_ERROR("Unknown plane allocation scheme type!")
-		}
-
-		block_manager->Allocate_block_and_page_in_plane_for_user_write(stream_id, read_address);
-		PPA_type ppa = Convert_address_to_ppa(read_address);
-		domain->Update_mapping_info(ideal_mapping_table, stream_id, lpa, ppa, read_sectors_bitmap);
-
-		return ppa;
-	}
-
-	inline void Address_Mapping_Unit_Page_Level::Get_data_mapping_info_for_gc(const stream_id_type stream_id, const LPA_type lpa, PPA_type& ppa, page_status_type& page_state)
-	{
-		if (domains[stream_id]->Mapping_entry_accessible(ideal_mapping_table, stream_id, lpa)) {
-			ppa = domains[stream_id]->Get_ppa(ideal_mapping_table, stream_id, lpa);
-			page_state = domains[stream_id]->Get_page_status(ideal_mapping_table, stream_id, lpa);
-		} else {
-			ppa = domains[stream_id]->GlobalMappingTable[lpa].PPA;
-			page_state = domains[stream_id]->GlobalMappingTable[lpa].WrittenStateBitmap;
-		}
-	}
-
-	inline void Address_Mapping_Unit_Page_Level::Get_translation_mapping_info_for_gc(const stream_id_type stream_id, const MVPN_type mvpn, MPPN_type& mppa, sim_time_type& timestamp)
-	{
-		mppa = domains[stream_id]->GlobalTranslationDirectory[mvpn].MPPN;
-		timestamp = domains[stream_id]->GlobalTranslationDirectory[mvpn].TimeStamp;
-	}
-
-	inline MVPN_type Address_Mapping_Unit_Page_Level::get_MVPN(const LPA_type lpn, stream_id_type stream_id)
-	{
-		//return (MVPN_type)((lpn % (domains[stream_id]->Total_logical_pages_no)) / no_of_translation_entries_per_page);
-		return (MVPN_type)(lpn / no_of_translation_entries_per_page);
-	}
-
-	inline LPA_type Address_Mapping_Unit_Page_Level::get_start_LPN_in_MVP(const MVPN_type mvpn)
-	{
-		return (MVPN_type)(mvpn * no_of_translation_entries_per_page);
-	}
-
-	inline LPA_type Address_Mapping_Unit_Page_Level::get_end_LPN_in_MVP(const MVPN_type mvpn)
-	{
-		return (MVPN_type)(mvpn * no_of_translation_entries_per_page + no_of_translation_entries_per_page - 1);
-	}
-
-	LPA_type Address_Mapping_Unit_Page_Level::Get_logical_pages_count(stream_id_type stream_id)
-	{
-		return this->domains[stream_id]->Total_logical_pages_no;
-	}
-	
-	inline NVM::FlashMemory::Physical_Page_Address Address_Mapping_Unit_Page_Level::Convert_ppa_to_address(const PPA_type ppa)
-	{
-		NVM::FlashMemory::Physical_Page_Address target;
-		target.ChannelID = (flash_channel_ID_type)(ppa / page_no_per_channel);
-		target.ChipID = (flash_chip_ID_type)((ppa % page_no_per_channel) / page_no_per_chip);
-		target.DieID = (flash_die_ID_type)(((ppa % page_no_per_channel) % page_no_per_chip) / page_no_per_die);
-		target.PlaneID = (flash_plane_ID_type)((((ppa % page_no_per_channel) % page_no_per_chip) % page_no_per_die) / page_no_per_plane);
-		target.BlockID = (flash_block_ID_type)(((((ppa % page_no_per_channel) % page_no_per_chip) % page_no_per_die) % page_no_per_plane) / pages_no_per_block);
-		target.PageID = (flash_page_ID_type)((((((ppa % page_no_per_channel) % page_no_per_chip) % page_no_per_die) % page_no_per_plane) % pages_no_per_block) % pages_no_per_block);
-
-		return target;
-	}
-
-	inline void Address_Mapping_Unit_Page_Level::Convert_ppa_to_address(const PPA_type ppn, NVM::FlashMemory::Physical_Page_Address& address)
-	{
-		address.ChannelID = (flash_channel_ID_type)(ppn / page_no_per_channel);
-		address.ChipID = (flash_chip_ID_type)((ppn % page_no_per_channel) / page_no_per_chip);
-		address.DieID = (flash_die_ID_type)(((ppn % page_no_per_channel) % page_no_per_chip) / page_no_per_die);
-		address.PlaneID = (flash_plane_ID_type)((((ppn % page_no_per_channel) % page_no_per_chip) % page_no_per_die) / page_no_per_plane);
-		address.BlockID = (flash_block_ID_type)(((((ppn % page_no_per_channel) % page_no_per_chip) % page_no_per_die) % page_no_per_plane) / pages_no_per_block);
-		address.PageID = (flash_page_ID_type)((((((ppn % page_no_per_channel) % page_no_per_chip) % page_no_per_die) % page_no_per_plane) % pages_no_per_block) % pages_no_per_block);
-
-	}
-
-	inline PPA_type Address_Mapping_Unit_Page_Level::Convert_address_to_ppa(const NVM::FlashMemory::Physical_Page_Address& pageAddress)
-	{
-		return (PPA_type)this->page_no_per_chip * (PPA_type)(pageAddress.ChannelID * this->chip_no_per_channel + pageAddress.ChipID)
-			+ this->page_no_per_die * pageAddress.DieID + this->page_no_per_plane * pageAddress.PlaneID
-			+ this->pages_no_per_block * pageAddress.BlockID + pageAddress.PageID;
-	}
-
-	bool Address_Mapping_Unit_Page_Level::request_mapping_entry(const stream_id_type stream_id, const LPA_type lpa)
-	{
-		AddressMappingDomain* domain = domains[stream_id];
-		MVPN_type mvpn = get_MVPN(lpa, stream_id);
-
-		/*This is the first time that a user request accesses this address.
-		Just create an entry in cache! No flash read is needed.*/
-		if (domain->GlobalTranslationDirectory[mvpn].MPPN == NO_MPPN) {
-			if (!domain->CMT->Check_free_slot_availability()) {
-				LPA_type evicted_lpa;
-				CMTSlotType evictedItem = domain->CMT->Evict_one_slot(evicted_lpa);
-				if (evictedItem.Dirty) {
-					/* In order to eliminate possible race conditions for the requests that
-					* will access the evicted lpa in the near future (before the translation
-					* write finishes), MQSim updates GMT (the on flash mapping table) right
-					* after eviction happens.*/
-					domain->GlobalMappingTable[evicted_lpa].PPA = evictedItem.PPA;
-					domain->GlobalMappingTable[evicted_lpa].WrittenStateBitmap = evictedItem.WrittenStateBitmap;
-					if (domain->GlobalMappingTable[evicted_lpa].TimeStamp > CurrentTimeStamp)
-						throw std::logic_error("Unexpected situation occurred in handling GMT!");
-					domain->GlobalMappingTable[evicted_lpa].TimeStamp = CurrentTimeStamp;
-					generate_flash_writeback_request_for_mapping_data(stream_id, evicted_lpa);
-				}
-			}
-			domain->CMT->Reserve_slot_for_lpn(stream_id, lpa);
-			domain->CMT->Insert_new_mapping_info(stream_id, lpa, NO_PPA, UNWRITTEN_LOGICAL_PAGE);
-			
-			return true;
-		}
-
-		/*A read transaction is already under process to retrieve the MVP content.
-		* This situation may happen in two different cases:
-		* 1. A read has been issued to retrieve unchanged parts of the mapping data and merge them
-		*     with the changed parts (i.e., an update read of MVP). This read will be followed
-		*     by a writeback of MVP content to a new flash page.
-		* 2. A read has been issued to retrieve the mapping data for some previous user requests*/
-		if (domain->ArrivingMappingEntries.find(mvpn) != domain->ArrivingMappingEntries.end())
-		{
-			if (domain->CMT->Is_slot_reserved_for_lpn_and_waiting(stream_id, lpa)) {
-				return false;
-			} else { //An entry should be created in the cache
-				if (!domain->CMT->Check_free_slot_availability()) {
-					LPA_type evicted_lpa;
-					CMTSlotType evictedItem = domain->CMT->Evict_one_slot(evicted_lpa);
-					if (evictedItem.Dirty) {
-						/* In order to eliminate possible race conditions for the requests that
-						* will access the evicted lpa in the near future (before the translation
-						* write finishes), MQSim updates GMT (the on flash mapping table) right
-						* after eviction happens.*/
-						domain->GlobalMappingTable[evicted_lpa].PPA = evictedItem.PPA;
-						domain->GlobalMappingTable[evicted_lpa].WrittenStateBitmap = evictedItem.WrittenStateBitmap;
-						if (domain->GlobalMappingTable[evicted_lpa].TimeStamp > CurrentTimeStamp)
-							throw std::logic_error("Unexpected situation occured in handling GMT!");
-						domain->GlobalMappingTable[evicted_lpa].TimeStamp = CurrentTimeStamp;
-						generate_flash_writeback_request_for_mapping_data(stream_id, evicted_lpa);
-					}
-				}
-				domain->CMT->Reserve_slot_for_lpn(stream_id, lpa);
-				domain->ArrivingMappingEntries.insert(std::pair<MVPN_type, LPA_type>(mvpn, lpa));
-
-				return false;
-			}
-		}
-
-		/*MQSim assumes that the data of all departing (evicted from CMT) translation pages are in memory, until
-		the flash program operation finishes and the entry it is cleared from DepartingMappingEntries.*/
-		if (domain->DepartingMappingEntries.find(mvpn) != domain->DepartingMappingEntries.end()) {
-			if (!domain->CMT->Check_free_slot_availability()) {
-				LPA_type evicted_lpa;
-				CMTSlotType evictedItem = domain->CMT->Evict_one_slot(evicted_lpa);
-				if (evictedItem.Dirty) {
-					/* In order to eliminate possible race conditions for the requests that
-					* will access the evicted lpa in the near future (before the translation
-					* write finishes), MQSim updates GMT (the on flash mapping table) right
-					* after eviction happens.*/
-					domain->GlobalMappingTable[evicted_lpa].PPA = evictedItem.PPA;
-					domain->GlobalMappingTable[evicted_lpa].WrittenStateBitmap = evictedItem.WrittenStateBitmap;
-					if (domain->GlobalMappingTable[evicted_lpa].TimeStamp > CurrentTimeStamp)
-						throw std::logic_error("Unexpected situation occured in handling GMT!");
-					domain->GlobalMappingTable[lpa].TimeStamp = CurrentTimeStamp;
-					generate_flash_writeback_request_for_mapping_data(stream_id, evicted_lpa);
-				}
-			}
-			domain->CMT->Reserve_slot_for_lpn(stream_id, lpa);
-			/*Hack: since we do not actually save the values of translation requests, we copy the mapping
-			data from GlobalMappingTable (which actually must be stored on flash)*/
-			domain->CMT->Insert_new_mapping_info(stream_id, lpa,
-				domain->GlobalMappingTable[lpa].PPA, domain->GlobalMappingTable[lpa].WrittenStateBitmap);
-			
-			return true;
-		}
-
-		//Non of the above options provide mapping data. So, MQSim, must read the translation data from flash memory
-		if (!domain->CMT->Check_free_slot_availability()) {
-			LPA_type evicted_lpa;
-			CMTSlotType evictedItem = domain->CMT->Evict_one_slot(evicted_lpa);
-			if (evictedItem.Dirty) {
-				/* In order to eliminate possible race conditions for the requests that
-				* will access the evicted lpa in the near future (before the translation
-				* write finishes), MQSim updates GMT (the on flash mapping table) right
-				* after eviction happens.*/
-				domain->GlobalMappingTable[evicted_lpa].PPA = evictedItem.PPA;
-				domain->GlobalMappingTable[evicted_lpa].WrittenStateBitmap = evictedItem.WrittenStateBitmap;
-				if (domain->GlobalMappingTable[evicted_lpa].TimeStamp > CurrentTimeStamp) {
-					throw std::logic_error("Unexpected situation occured in handling GMT!");
-				}
-				domain->GlobalMappingTable[evicted_lpa].TimeStamp = CurrentTimeStamp;
-				generate_flash_writeback_request_for_mapping_data(stream_id, evicted_lpa);
-			}
-		}
-		domain->CMT->Reserve_slot_for_lpn(stream_id, lpa);
-		generate_flash_read_request_for_mapping_data(stream_id, lpa);//consult GTD and create read transaction
-		
-		return false;
 	}
 
 	void Address_Mapping_Unit_Page_Level::generate_flash_writeback_request_for_mapping_data(const stream_id_type stream_id, const LPA_type lpn)
@@ -1627,6 +1176,11 @@ namespace SSD_Components
 		}
 	}
 
+	/*
+	* 매핑 데이터를 위한 플래시 읽기 요청을 생성하는 함수
+	* 논리 페이지 번호(LPN)에 해당하는 매핑 정보를 읽어오기 위해 플래시 메모리에 읽기 요청을 보냄
+	* GC(가비지 컬렉션)로 인해 해당 매핑이 잠겨있는 경우 barrier 처리를 함
+	*/
 	void Address_Mapping_Unit_Page_Level::generate_flash_read_request_for_mapping_data(const stream_id_type stream_id, const LPA_type lpn)
 	{
 		MVPN_type mvpn = get_MVPN(lpn, stream_id);
@@ -1662,6 +1216,13 @@ namespace SSD_Components
 		}
 	}
 
+	/*
+	* PHY(물리 계층)로부터 트랜잭션 처리 완료 신호를 받았을 때 호출되는 함수
+	* 매핑 관련 읽기/쓰기 작업이 완료되었을 때 후속 처리를 담당
+	* - 매핑 테이블 업데이트
+	* - 대기 중인 읽기/쓰기 요청 처리
+	* - CMT(Cached Mapping Table) 관리
+	*/
 	inline void Address_Mapping_Unit_Page_Level::handle_transaction_serviced_signal_from_PHY(NVM_Transaction_Flash* transaction)
 	{
 		//First check if the transaction source is Mapping Module
@@ -1737,16 +1298,26 @@ namespace SSD_Components
 		}
 	}
 
+	/*
+	* GC(가비지 컬렉션)를 위해 특정 논리 페이지가 잠겨있는지 확인하는 함수
+	*/
 	inline bool Address_Mapping_Unit_Page_Level::is_lpa_locked_for_gc(stream_id_type stream_id, LPA_type lpa)
 	{
 		return domains[stream_id]->Locked_LPAs.find(lpa) != domains[stream_id]->Locked_LPAs.end();
 	}
 
+	/*
+	* GC를 위해 특정 매핑 가상 페이지가 잠겨있는지 확인하는 함수
+	*/
 	inline bool Address_Mapping_Unit_Page_Level::is_mvpn_locked_for_gc(stream_id_type stream_id, MVPN_type mvpn)
 	{
 		return domains[stream_id]->Locked_MVPNs.find(mvpn) != domains[stream_id]->Locked_MVPNs.end();
 	}
 
+	/*
+	* GC 작업을 위해 특정 논리 페이지에 접근 barrier를 설정하는 함수
+	* 해당 페이지가 이미 잠겨있으면 에러 발생
+	*/
 	inline void Address_Mapping_Unit_Page_Level::Set_barrier_for_accessing_lpa(stream_id_type stream_id, LPA_type lpa)
 	{
 		auto itr = domains[stream_id]->Locked_LPAs.find(lpa);
@@ -1756,6 +1327,10 @@ namespace SSD_Components
 		domains[stream_id]->Locked_LPAs.insert(lpa);
 	}
 
+	/*
+	* GC 작업을 위해 특정 매핑 가상 페이지에 접근 barrier를 설정하는 함수
+	* 해당 페이지가 이미 잠겨있으면 에러 발생
+	*/
 	inline void Address_Mapping_Unit_Page_Level::Set_barrier_for_accessing_mvpn(stream_id_type stream_id, MVPN_type mvpn)
 	{
 		auto itr = domains[stream_id]->Locked_MVPNs.find(mvpn);
@@ -1765,6 +1340,11 @@ namespace SSD_Components
 		domains[stream_id]->Locked_MVPNs.insert(mvpn);
 	}
 
+	/*
+	* 물리적 블록에 대한 접근 barrier를 설정하는 함수
+	* GC 작업 시 해당 블록의 모든 유효한 페이지들에 대해 barrier 설정
+	* 매핑 데이터를 포함하는 블록과 일반 데이터 블록을 구분하여 처리
+	*/
 	inline void Address_Mapping_Unit_Page_Level::Set_barrier_for_accessing_physical_block(const NVM::FlashMemory::Physical_Page_Address& block_address)
 	{
 		//The LPAs are actually not known until they are read one-by-one from flash storage. But, to reduce MQSim's complexity, we assume that LPAs are stored in DRAM and thus no read from flash storage is needed.
@@ -1794,6 +1374,10 @@ namespace SSD_Components
 		}
 	}
 
+	/*
+	* 논리 페이지에 대한 접근 barrier를 제거하는 함수
+	* barrier 뒤에서 대기하던 읽기/쓰기 요청들을 처리
+	*/
 	inline void Address_Mapping_Unit_Page_Level::Remove_barrier_for_accessing_lpa(stream_id_type stream_id, LPA_type lpa)
 	{
 		auto itr = domains[stream_id]->Locked_LPAs.find(lpa);
@@ -1821,6 +1405,10 @@ namespace SSD_Components
 		}
 	}
 
+	/*
+	* 매핑 가상 페이지에 대한 접근 barrier를 제거하는 함수
+	* barrier 뒤에서 대기하던 읽기/쓰기 요청들을 처리
+	*/
 	inline void Address_Mapping_Unit_Page_Level::Remove_barrier_for_accessing_mvpn(stream_id_type stream_id, MVPN_type mvpn)
 	{
 		auto itr = domains[stream_id]->Locked_MVPNs.find(mvpn);
@@ -1887,6 +1475,10 @@ namespace SSD_Components
 		}
 	}
 
+	/*
+	* barrier에 막힌 사용자 트랜잭션을 관리하는 함수
+	* 읽기/쓰기 요청을 barrier 대기 큐에 삽입
+	*/
 	inline void Address_Mapping_Unit_Page_Level::manage_user_transaction_facing_barrier(NVM_Transaction_Flash* transaction)
 	{
 		std::pair<LPA_type, NVM_Transaction_Flash*> entry(transaction->LPA, transaction);
@@ -1897,6 +1489,10 @@ namespace SSD_Components
 		}
 	}
 
+	/*
+	* barrier에 막힌 매핑 트랜잭션을 관리하는 함수
+	* 읽기/쓰기 요청을 barrier 대기 큐에 삽입
+	*/
 	inline void Address_Mapping_Unit_Page_Level::manage_mapping_transaction_facing_barrier(stream_id_type stream_id, MVPN_type mvpn, bool read)
 	{
 		if (read) {
@@ -1906,12 +1502,20 @@ namespace SSD_Components
 		}
 	}
 
+	/*
+	* 주소 변환에 실패한 트랜잭션을 처리하는 함수
+	* 주로 plane이 가득 찼을 때 발생하는 프로그램 트랜잭션을 처리
+	*/
 	void Address_Mapping_Unit_Page_Level::mange_unsuccessful_translation(NVM_Transaction_Flash* transaction)
 	{
 		//Currently, the only unsuccessfull translation would be for program translations that are accessing a plane that is running out of free pages
 		Write_transactions_for_overfull_planes[transaction->Address.ChannelID][transaction->Address.ChipID][transaction->Address.DieID][transaction->Address.PlaneID].insert((NVM_Transaction_Flash_WR*)transaction);
 	}
 
+	/*
+	* 가득 찬 plane에 대한 쓰기 요청 처리를 시작하는 함수
+	* plane에 여유 공간이 생기면 대기 중인 쓰기 요청들을 처리
+	*/
 	void Address_Mapping_Unit_Page_Level::Start_servicing_writes_for_overfull_plane(const NVM::FlashMemory::Physical_Page_Address plane_address)
 	{
 		std::set<NVM_Transaction_Flash_WR*>& waiting_write_list = Write_transactions_for_overfull_planes[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID];
